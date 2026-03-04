@@ -77,8 +77,10 @@ type Token struct {
 	Type     TokenType
 	Value    string
 	Position int
+	Line     int
+	Column   int
 }
 
 func (t Token) String() string {
-	return fmt.Sprintf("Token(Type: %s, Value: %q) at %d", t.Type.String(), t.Value, t.Position)
+	return fmt.Sprintf("Token(Type: %s, Value: %q) at %d:%d", t.Type.String(), t.Value, t.Line, t.Column)
 }

@@ -6,18 +6,33 @@ type Lexer struct {
 	input    string
 	length   int
 	position int
+	line     int
+	column   int
 }
 
 func NewLexer(input string) *Lexer {
 	return &Lexer{
 		input:  input,
 		length: len(input),
+		line:   1,
+		column: 1,
 	}
 }
 
 func (l *Lexer) Tokenize() ([]Token, error) {
 	var result []Token
+	err := l.TokenizeEach(func(tok Token) bool {
+		result = append(result, tok)
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
 
+	return result, nil
+}
+
+func (l *Lexer) TokenizeEach(yield func(Token) bool) error {
 	for l.position < l.length {
 		current := l.Peek()
 
@@ -27,75 +42,130 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 		}
 
 		if isDigit(current) {
-			l.tokenizeNumber(&result)
-			continue
-		}
-
-		if isAlpha(current) {
-			l.tokenizeWord(&result)
-			continue
-		}
-
-		if current == '"' {
-			if err := l.tokenizeString(&result); err != nil {
-				return nil, err
+			if !yield(l.readNumber()) {
+				return nil
 			}
 			continue
 		}
 
-		if err := l.tokenizeOperator(&result); err != nil {
-			return nil, err
+		if isAlpha(current) {
+			if !yield(l.readWord()) {
+				return nil
+			}
+			continue
+		}
+
+		if current == '"' {
+			tok, err := l.readString()
+			if err != nil {
+				return err
+			}
+			if !yield(tok) {
+				return nil
+			}
+			continue
+		}
+
+		tok, err := l.readOperatorOrPunctuation()
+		if err != nil {
+			return err
+		}
+		if !yield(tok) {
+			return nil
 		}
 	}
 
-	result = append(result, Token{Type: TokenEOF, Value: "", Position: l.position})
-	return result, nil
+	eofToken := Token{
+		Type:     TokenEOF,
+		Value:    "",
+		Position: l.position,
+		Line:     l.line,
+		Column:   l.column,
+	}
+	yield(eofToken)
+	return nil
 }
 
-func (l *Lexer) tokenizeNumber(result *[]Token) {
+var keywords = map[string]TokenType{
+	"var":    TokenVar,
+	"print":  TokenPrint,
+	"if":     TokenIf,
+	"else":   TokenElse,
+	"while":  TokenWhile,
+	"and":    TokenAnd,
+	"or":     TokenOr,
+	"string": TokenString,
+}
+
+var operators = map[string]TokenType{
+	"==": TokenEqEq,
+	"!=": TokenNeq,
+	"<=": TokenLtEq,
+	">=": TokenGtEq,
+	"&&": TokenAnd,
+	"||": TokenOr,
+	"+":  TokenPlus,
+	"-":  TokenMinus,
+	"*":  TokenStar,
+	"/":  TokenSlash,
+	"=":  TokenEq,
+	"<":  TokenLt,
+	">":  TokenGt,
+	"!":  TokenExcl,
+	"(":  TokenLParen,
+	")":  TokenRParen,
+	"{":  TokenLBrace,
+	"}":  TokenRBrace,
+	";":  TokenSemicolon,
+}
+
+func (l *Lexer) readNumber() Token {
 	start := l.position
+	startLine := l.line
+	startCol := l.column
 
 	for isDigit(l.Peek()) {
 		l.Next()
 	}
 
 	numberStr := l.input[start:l.position]
-	l.addToken(result, TokenNumber, numberStr, start)
+	return Token{
+		Type:     TokenNumber,
+		Value:    numberStr,
+		Position: start,
+		Line:     startLine,
+		Column:   startCol,
+	}
 }
 
-func (l *Lexer) tokenizeWord(result *[]Token) {
+func (l *Lexer) readWord() Token {
 	start := l.position
+	startLine := l.line
+	startCol := l.column
 
 	for isAlphaNumeric(l.Peek()) {
 		l.Next()
 	}
 
 	word := l.input[start:l.position]
+	tokenType := TokenID
+	if kwType, ok := keywords[word]; ok {
+		tokenType = kwType
+	}
 
-	switch word {
-	case "var":
-		l.addToken(result, TokenVar, word, start)
-	case "print":
-		l.addToken(result, TokenPrint, word, start)
-	case "if":
-		l.addToken(result, TokenIf, word, start)
-	case "else":
-		l.addToken(result, TokenElse, word, start)
-	case "while":
-		l.addToken(result, TokenWhile, word, start)
-	case "and":
-		l.addToken(result, TokenAnd, word, start)
-	case "or":
-		l.addToken(result, TokenOr, word, start)
-	case "string":
-		l.addToken(result, TokenString, word, start)
-	default:
-		l.addToken(result, TokenID, word, start)
+	return Token{
+		Type:     tokenType,
+		Value:    word,
+		Position: start,
+		Line:     startLine,
+		Column:   startCol,
 	}
 }
 
-func (l *Lexer) tokenizeString(result *[]Token) error {
+func (l *Lexer) readString() (Token, error) {
 	start := l.position
+	startLine := l.line
+	startCol := l.column
 	l.Next()
 
 	for l.position < l.length && l.Peek() != '"' {
@@ -103,100 +173,53 @@ func (l *Lexer) tokenizeString(result *[]Token) error {
 	}
 
 	if l.position >= l.length {
-		return fmt.Errorf("unterminated string at position %d", start)
+		return Token{}, fmt.Errorf("unterminated string at %d:%d", startLine, startCol)
 	}
 
 	l.Next()
 	value := l.input[start+1 : l.position-1]
-	l.addToken(result, TokenString, value, start)
-	return nil
+	return Token{
+		Type:     TokenString,
+		Value:    value,
+		Position: start,
+		Line:     startLine,
+		Column:   startCol,
+	}, nil
 }
 
-func (l *Lexer) tokenizeOperator(result *[]Token) error {
-	current := l.Peek()
+func (l *Lexer) readOperatorOrPunctuation() (Token, error) {
 	start := l.position
+	startLine := l.line
+	startCol := l.column
 
-	switch current {
-	case '+':
-		l.Next()
-		l.addToken(result, TokenPlus, "+", start)
-	case '-':
-		l.Next()
-		l.addToken(result, TokenMinus, "-", start)
-	case '*':
-		l.Next()
-		l.addToken(result, TokenStar, "*", start)
-	case '/':
-		l.Next()
-		l.addToken(result, TokenSlash, "/", start)
-	case '=':
-		l.Next()
-		if l.Peek() == '=' {
+	if l.position+1 < l.length {
+		twoChars := l.input[l.position : l.position+2]
+		if tokenType, ok := operators[twoChars]; ok {
 			l.Next()
-			l.addToken(result, TokenEqEq, "==", start)
-		} else {
-			l.addToken(result, TokenEq, "=", start)
-		}
-	case '!':
-		l.Next()
-		if l.Peek() == '=' {
 			l.Next()
-			l.addToken(result, TokenNeq, "!=", start)
-		} else {
-			l.addToken(result, TokenExcl, "!", start)
+			return Token{
+				Type:     tokenType,
+				Value:    twoChars,
+				Position: start,
+				Line:     startLine,
+				Column:   startCol,
+			}, nil
 		}
-	case '<':
-		l.Next()
-		if l.Peek() == '=' {
-			l.Next()
-			l.addToken(result, TokenLtEq, "<=", start)
-		} else {
-			l.addToken(result, TokenLt, "<", start)
-		}
-	case '>':
-		l.Next()
-		if l.Peek() == '=' {
-			l.Next()
-			l.addToken(result, TokenGtEq, ">=", start)
-		} else {
-			l.addToken(result, TokenGt, ">", start)
-		}
-	case '&':
-		l.Next()
-		if l.Peek() == '&' {
-			l.Next()
-			l.addToken(result, TokenAnd, "&&", start)
-		} else {
-			return fmt.Errorf("unexpected character '&' at position %d", start)
-		}
-	case '|':
-		l.Next()
-		if l.Peek() == '|' {
-			l.Next()
-			l.addToken(result, TokenOr, "||", start)
-		} else {
-			return fmt.Errorf("unexpected character '|' at position %d", start)
-		}
-	case '(':
-		l.Next()
-		l.addToken(result, TokenLParen, "(", start)
-	case ')':
-		l.Next()
-		l.addToken(result, TokenRParen, ")", start)
-	case '{':
-		l.Next()
-		l.addToken(result, TokenLBrace, "{", start)
-	case '}':
-		l.Next()
-		l.addToken(result, TokenRBrace, "}", start)
-	case ';':
-		l.Next()
-		l.addToken(result, TokenSemicolon, ";", start)
-	default:
-		return fmt.Errorf("unexpected character '%c' at position %d", current, start)
 	}
 
-	return nil
+	oneChar := l.input[l.position : l.position+1]
+	if tokenType, ok := operators[oneChar]; ok {
+		l.Next()
+		return Token{
+			Type:     tokenType,
+			Value:    oneChar,
+			Position: start,
+			Line:     startLine,
+			Column:   startCol,
+		}, nil
+	}
+
+	return Token{}, fmt.Errorf("unexpected character '%c' at %d:%d", l.Peek(), startLine, startCol)
 }
 
 func (l *Lexer) Peek() byte {
@@ -212,15 +235,13 @@ func (l *Lexer) Next() byte {
 	}
 	ch := l.input[l.position]
 	l.position++
+	if ch == '\n' {
+		l.line++
+		l.column = 1
+	} else {
+		l.column++
+	}
 	return ch
-}
-
-func (l *Lexer) addToken(result *[]Token, tokenType TokenType, value string, start int) {
-	*result = append(*result, Token{
-		Type:     tokenType,
-		Value:    value,
-		Position: start,
-	})
 }
 
 func isWhitespace(ch byte) bool {
