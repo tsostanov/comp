@@ -19,9 +19,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	for _, tok := range tokens {
-		fmt.Println(tok)
+	parser := NewParser(tokens)
+	statements, err := parser.Parse()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
+
+	printer := NewAstPrinter()
+	fmt.Print(printer.Print(statements))
 }
 
 func readInput() (string, error) {
