@@ -26,6 +26,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	analyzer := NewSemanticAnalyzer()
+	analyzer.Analyze(statements)
+	for _, diagnostic := range analyzer.Diagnostics() {
+		fmt.Fprintln(os.Stderr, diagnostic)
+	}
+	if analyzer.HasErrors() {
+		os.Exit(1)
+	}
+
 	printer := NewAstPrinter()
 	fmt.Print(printer.Print(statements))
 }
