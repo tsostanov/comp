@@ -26,42 +26,183 @@ type SymbolFlags struct {
 	Used        bool
 }
 
-type Symbol struct {
+type VariableInfo struct {
 	Name       string
 	DeclaredAt Token
 	Flags      SymbolFlags
 }
 
-type Scope struct {
-	parent  *Scope
-	symbols map[string]*Symbol
+type SemanticEnvironment struct {
+	parent    *SemanticEnvironment
+	variables map[string]*VariableInfo
 }
 
-type symbolState struct {
+func NewSemanticEnvironment(parent *SemanticEnvironment) *SemanticEnvironment {
+	return &SemanticEnvironment{
+		parent:    parent,
+		variables: make(map[string]*VariableInfo),
+	}
+}
+
+func (e *SemanticEnvironment) Parent() *SemanticEnvironment {
+	return e.parent
+}
+
+func (e *SemanticEnvironment) DefineVariable(name Token) (*VariableInfo, bool) {
+	if _, exists := e.variables[name.Value]; exists {
+		return nil, false
+	}
+
+	variable := &VariableInfo{
+		Name:       name.Value,
+		DeclaredAt: name,
+		Flags: SymbolFlags{
+			Defined: true,
+		},
+	}
+	e.variables[name.Value] = variable
+	return variable, true
+}
+
+func (e *SemanticEnvironment) ResolveVariable(name string) *VariableInfo {
+	for current := e; current != nil; current = current.parent {
+		if variable, ok := current.variables[name]; ok {
+			return variable
+		}
+	}
+	return nil
+}
+
+func (e *SemanticEnvironment) IsVariableDefined(name string) bool {
+	variable := e.ResolveVariable(name)
+	return variable != nil && variable.Flags.Defined
+}
+
+type variableState struct {
 	defined     bool
 	initialized bool
 	used        bool
 }
 
 type SemanticAnalyzer struct {
-	currentScope *Scope
-	allSymbols   []*Symbol
-	diagnostics  []SemanticDiagnostic
+	environment *SemanticEnvironment
+	variables   []*VariableInfo
+	diagnostics []SemanticDiagnostic
 }
 
 func NewSemanticAnalyzer() *SemanticAnalyzer {
-	globalScope := &Scope{symbols: make(map[string]*Symbol)}
 	return &SemanticAnalyzer{
-		currentScope: globalScope,
+		environment: NewSemanticEnvironment(nil),
 	}
 }
 
-func (a *SemanticAnalyzer) Analyze(stmts []Stmt) []SemanticDiagnostic {
-	for _, stmt := range stmts {
-		a.analyzeStmt(stmt)
+func (a *SemanticAnalyzer) Analyze(statements []Stmt) []SemanticDiagnostic {
+	for _, statement := range statements {
+		a.VisitStatement(statement)
 	}
-	a.reportUnusedSymbols()
+	a.reportUnusedVariables()
 	return a.diagnostics
+}
+
+func (a *SemanticAnalyzer) VisitStatement(statement Stmt) {
+	switch s := statement.(type) {
+	case VarStmt:
+		if s.Initializer != nil {
+			a.VisitExpression(s.Initializer)
+		}
+
+		variable, ok := a.environment.DefineVariable(s.Name)
+		if !ok {
+			a.errorAt(s.Name, "variable "+s.Name.Value+" is already declared in this scope")
+			return
+		}
+		a.variables = append(a.variables, variable)
+
+		if s.Initializer != nil {
+			variable.Flags.Initialized = true
+		}
+	case PrintStmt:
+		a.VisitExpression(s.Expression)
+	case ExprStmt:
+		a.VisitExpression(s.Expression)
+	case BlockStmt:
+		previousEnvironment := a.environment
+		a.environment = NewSemanticEnvironment(previousEnvironment)
+
+		for _, nested := range s.Statements {
+			a.VisitStatement(nested)
+		}
+
+		a.environment = previousEnvironment
+	case IfStmt:
+		a.VisitExpression(s.Condition)
+		before := a.snapshotVariableStates()
+
+		a.VisitStatement(s.ThenBranch)
+		thenState := a.snapshotVariableStates()
+
+		if s.ElseBranch == nil {
+			a.restoreVariableStates(before)
+			a.mergeVariableStates(before, thenState, nil)
+			return
+		}
+
+		a.restoreVariableStates(before)
+		a.VisitStatement(s.ElseBranch)
+		elseState := a.snapshotVariableStates()
+		a.restoreVariableStates(before)
+		a.mergeVariableStates(before, thenState, elseState)
+	case WhileStmt:
+		a.VisitExpression(s.Condition)
+		before := a.snapshotVariableStates()
+
+		a.VisitStatement(s.Body)
+		bodyState := a.snapshotVariableStates()
+		a.restoreVariableStates(before)
+
+		// Loop body may never execute, so initialization is not guaranteed afterwards.
+		for variable, state := range before {
+			body := bodyState[variable]
+			variable.Flags.Defined = state.defined
+			variable.Flags.Initialized = state.initialized
+			variable.Flags.Used = state.used || body.used
+		}
+	}
+}
+
+func (a *SemanticAnalyzer) VisitExpression(expression Expr) {
+	switch e := expression.(type) {
+	case LiteralExpr:
+		return
+	case VariableExpr:
+		variable := a.environment.ResolveVariable(e.Name.Value)
+		if variable == nil || !variable.Flags.Defined {
+			a.errorAt(e.Name, "use of undeclared variable "+e.Name.Value)
+			return
+		}
+
+		variable.Flags.Used = true
+		if !variable.Flags.Initialized {
+			a.errorAt(e.Name, "variable "+e.Name.Value+" is used before initialization")
+		}
+	case AssignExpr:
+		a.VisitExpression(e.Value)
+
+		variable := a.environment.ResolveVariable(e.Name.Value)
+		if variable == nil || !variable.Flags.Defined {
+			a.errorAt(e.Name, "assignment to undeclared variable "+e.Name.Value)
+			return
+		}
+
+		variable.Flags.Initialized = true
+	case BinaryExpr:
+		a.VisitExpression(e.Left)
+		a.VisitExpression(e.Right)
+	case UnaryExpr:
+		a.VisitExpression(e.Right)
+	case GroupingExpr:
+		a.VisitExpression(e.Expression)
+	}
 }
 
 func (a *SemanticAnalyzer) HasErrors() bool {
@@ -77,181 +218,54 @@ func (a *SemanticAnalyzer) Diagnostics() []SemanticDiagnostic {
 	return a.diagnostics
 }
 
-func (a *SemanticAnalyzer) analyzeStmt(stmt Stmt) {
-	switch s := stmt.(type) {
-	case VarStmt:
-		symbol := a.declare(s.Name)
-		if s.Initializer != nil {
-			a.analyzeExpr(s.Initializer)
-			if symbol != nil {
-				symbol.Flags.Initialized = true
-			}
-		}
-	case PrintStmt:
-		a.analyzeExpr(s.Expression)
-	case ExprStmt:
-		a.analyzeExpr(s.Expression)
-	case BlockStmt:
-		a.beginScope()
-		for _, nested := range s.Statements {
-			a.analyzeStmt(nested)
-		}
-		a.endScope()
-	case IfStmt:
-		a.analyzeExpr(s.Condition)
-		before := a.snapshotStates()
-
-		a.analyzeStmt(s.ThenBranch)
-		thenState := a.snapshotStates()
-
-		if s.ElseBranch == nil {
-			a.restoreStates(before)
-			a.mergeStates(before, thenState, nil)
-			return
-		}
-
-		a.restoreStates(before)
-		a.analyzeStmt(s.ElseBranch)
-		elseState := a.snapshotStates()
-		a.restoreStates(before)
-		a.mergeStates(before, thenState, elseState)
-	case WhileStmt:
-		a.analyzeExpr(s.Condition)
-		before := a.snapshotStates()
-		a.analyzeStmt(s.Body)
-		bodyState := a.snapshotStates()
-		a.restoreStates(before)
-
-		// Loop body may never execute, so only "used" is merged back.
-		for symbol, state := range before {
-			body := bodyState[symbol]
-			symbol.Flags.Defined = state.defined
-			symbol.Flags.Initialized = state.initialized
-			symbol.Flags.Used = state.used || body.used
-		}
-	}
-}
-
-func (a *SemanticAnalyzer) analyzeExpr(expr Expr) {
-	switch e := expr.(type) {
-	case LiteralExpr:
-		return
-	case VariableExpr:
-		symbol := a.resolve(e.Name.Value)
-		if symbol == nil || !symbol.Flags.Defined {
-			a.errorAt(e.Name, "use of undeclared variable "+e.Name.Value)
-			return
-		}
-		symbol.Flags.Used = true
-		if !symbol.Flags.Initialized {
-			a.errorAt(e.Name, "variable "+e.Name.Value+" is used before initialization")
-		}
-	case UnaryExpr:
-		a.analyzeExpr(e.Right)
-	case BinaryExpr:
-		a.analyzeExpr(e.Left)
-		a.analyzeExpr(e.Right)
-	case AssignExpr:
-		symbol := a.resolve(e.Name.Value)
-		if symbol == nil || !symbol.Flags.Defined {
-			a.errorAt(e.Name, "assignment to undeclared variable "+e.Name.Value)
-			a.analyzeExpr(e.Value)
-			return
-		}
-		a.analyzeExpr(e.Value)
-		symbol.Flags.Initialized = true
-	case GroupingExpr:
-		a.analyzeExpr(e.Expression)
-	}
-}
-
-func (a *SemanticAnalyzer) declare(name Token) *Symbol {
-	if _, exists := a.currentScope.symbols[name.Value]; exists {
-		a.errorAt(name, "variable "+name.Value+" is already declared in this scope")
-		return nil
-	}
-
-	symbol := &Symbol{
-		Name:       name.Value,
-		DeclaredAt: name,
-		Flags: SymbolFlags{
-			Defined: true,
-		},
-	}
-	a.currentScope.symbols[name.Value] = symbol
-	a.allSymbols = append(a.allSymbols, symbol)
-	return symbol
-}
-
-func (a *SemanticAnalyzer) resolve(name string) *Symbol {
-	for scope := a.currentScope; scope != nil; scope = scope.parent {
-		if symbol, ok := scope.symbols[name]; ok {
-			return symbol
-		}
-	}
-	return nil
-}
-
-func (a *SemanticAnalyzer) beginScope() {
-	a.currentScope = &Scope{
-		parent:  a.currentScope,
-		symbols: make(map[string]*Symbol),
-	}
-}
-
-func (a *SemanticAnalyzer) endScope() {
-	if a.currentScope.parent != nil {
-		a.currentScope = a.currentScope.parent
-	}
-}
-
-func (a *SemanticAnalyzer) snapshotStates() map[*Symbol]symbolState {
-	snapshot := make(map[*Symbol]symbolState, len(a.allSymbols))
-	for _, symbol := range a.allSymbols {
-		snapshot[symbol] = symbolState{
-			defined:     symbol.Flags.Defined,
-			initialized: symbol.Flags.Initialized,
-			used:        symbol.Flags.Used,
+func (a *SemanticAnalyzer) snapshotVariableStates() map[*VariableInfo]variableState {
+	snapshot := make(map[*VariableInfo]variableState, len(a.variables))
+	for _, variable := range a.variables {
+		snapshot[variable] = variableState{
+			defined:     variable.Flags.Defined,
+			initialized: variable.Flags.Initialized,
+			used:        variable.Flags.Used,
 		}
 	}
 	return snapshot
 }
 
-func (a *SemanticAnalyzer) restoreStates(snapshot map[*Symbol]symbolState) {
-	for symbol, state := range snapshot {
-		symbol.Flags.Defined = state.defined
-		symbol.Flags.Initialized = state.initialized
-		symbol.Flags.Used = state.used
+func (a *SemanticAnalyzer) restoreVariableStates(snapshot map[*VariableInfo]variableState) {
+	for variable, state := range snapshot {
+		variable.Flags.Defined = state.defined
+		variable.Flags.Initialized = state.initialized
+		variable.Flags.Used = state.used
 	}
 }
 
-func (a *SemanticAnalyzer) mergeStates(before, left, right map[*Symbol]symbolState) {
-	for symbol, state := range before {
-		leftState := left[symbol]
+func (a *SemanticAnalyzer) mergeVariableStates(before, left, right map[*VariableInfo]variableState) {
+	for variable, state := range before {
+		leftState := left[variable]
 		if right == nil {
-			symbol.Flags.Defined = state.defined
-			symbol.Flags.Initialized = state.initialized
-			symbol.Flags.Used = state.used || leftState.used
+			variable.Flags.Defined = state.defined
+			variable.Flags.Initialized = state.initialized
+			variable.Flags.Used = state.used || leftState.used
 			continue
 		}
 
-		rightState := right[symbol]
-		symbol.Flags.Defined = leftState.defined && rightState.defined
-		symbol.Flags.Initialized = leftState.initialized && rightState.initialized
-		symbol.Flags.Used = leftState.used || rightState.used
+		rightState := right[variable]
+		variable.Flags.Defined = leftState.defined && rightState.defined
+		variable.Flags.Initialized = leftState.initialized && rightState.initialized
+		variable.Flags.Used = leftState.used || rightState.used
 	}
 }
 
-func (a *SemanticAnalyzer) reportUnusedSymbols() {
-	for _, symbol := range a.allSymbols {
-		if !symbol.Flags.Defined || symbol.Flags.Used {
+func (a *SemanticAnalyzer) reportUnusedVariables() {
+	for _, variable := range a.variables {
+		if !variable.Flags.Defined || variable.Flags.Used {
 			continue
 		}
+
 		a.diagnostics = append(a.diagnostics, SemanticDiagnostic{
 			Severity: SeverityWarning,
-			Message:  "variable " + symbol.Name + " is declared but never used",
-			Line:     symbol.DeclaredAt.Line,
-			Column:   symbol.DeclaredAt.Column,
+			Message:  "variable " + variable.Name + " is declared but never used",
+			Line:     variable.DeclaredAt.Line,
+			Column:   variable.DeclaredAt.Column,
 		})
 	}
 }
