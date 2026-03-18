@@ -20,11 +20,16 @@ func (d SemanticDiagnostic) String() string {
 	return fmt.Sprintf("%s at %d:%d: %s", d.Severity, d.Line, d.Column, d.Message)
 }
 
-type Symbol struct {
-	Name        string
-	DeclaredAt  Token
+type SymbolFlags struct {
+	Defined     bool
 	Initialized bool
 	Used        bool
+}
+
+type Symbol struct {
+	Name       string
+	DeclaredAt Token
+	Flags      SymbolFlags
 }
 
 type Scope struct {
@@ -33,6 +38,7 @@ type Scope struct {
 }
 
 type symbolState struct {
+	defined     bool
 	initialized bool
 	used        bool
 }
@@ -78,7 +84,7 @@ func (a *SemanticAnalyzer) analyzeStmt(stmt Stmt) {
 		if s.Initializer != nil {
 			a.analyzeExpr(s.Initializer)
 			if symbol != nil {
-				symbol.Initialized = true
+				symbol.Flags.Initialized = true
 			}
 		}
 	case PrintStmt:
@@ -119,8 +125,9 @@ func (a *SemanticAnalyzer) analyzeStmt(stmt Stmt) {
 		// Loop body may never execute, so only "used" is merged back.
 		for symbol, state := range before {
 			body := bodyState[symbol]
-			symbol.Initialized = state.initialized
-			symbol.Used = state.used || body.used
+			symbol.Flags.Defined = state.defined
+			symbol.Flags.Initialized = state.initialized
+			symbol.Flags.Used = state.used || body.used
 		}
 	}
 }
@@ -131,12 +138,12 @@ func (a *SemanticAnalyzer) analyzeExpr(expr Expr) {
 		return
 	case VariableExpr:
 		symbol := a.resolve(e.Name.Value)
-		if symbol == nil {
+		if symbol == nil || !symbol.Flags.Defined {
 			a.errorAt(e.Name, "use of undeclared variable "+e.Name.Value)
 			return
 		}
-		symbol.Used = true
-		if !symbol.Initialized {
+		symbol.Flags.Used = true
+		if !symbol.Flags.Initialized {
 			a.errorAt(e.Name, "variable "+e.Name.Value+" is used before initialization")
 		}
 	case UnaryExpr:
@@ -146,13 +153,13 @@ func (a *SemanticAnalyzer) analyzeExpr(expr Expr) {
 		a.analyzeExpr(e.Right)
 	case AssignExpr:
 		symbol := a.resolve(e.Name.Value)
-		if symbol == nil {
+		if symbol == nil || !symbol.Flags.Defined {
 			a.errorAt(e.Name, "assignment to undeclared variable "+e.Name.Value)
 			a.analyzeExpr(e.Value)
 			return
 		}
 		a.analyzeExpr(e.Value)
-		symbol.Initialized = true
+		symbol.Flags.Initialized = true
 	case GroupingExpr:
 		a.analyzeExpr(e.Expression)
 	}
@@ -167,6 +174,9 @@ func (a *SemanticAnalyzer) declare(name Token) *Symbol {
 	symbol := &Symbol{
 		Name:       name.Value,
 		DeclaredAt: name,
+		Flags: SymbolFlags{
+			Defined: true,
+		},
 	}
 	a.currentScope.symbols[name.Value] = symbol
 	a.allSymbols = append(a.allSymbols, symbol)
@@ -199,8 +209,9 @@ func (a *SemanticAnalyzer) snapshotStates() map[*Symbol]symbolState {
 	snapshot := make(map[*Symbol]symbolState, len(a.allSymbols))
 	for _, symbol := range a.allSymbols {
 		snapshot[symbol] = symbolState{
-			initialized: symbol.Initialized,
-			used:        symbol.Used,
+			defined:     symbol.Flags.Defined,
+			initialized: symbol.Flags.Initialized,
+			used:        symbol.Flags.Used,
 		}
 	}
 	return snapshot
@@ -208,8 +219,9 @@ func (a *SemanticAnalyzer) snapshotStates() map[*Symbol]symbolState {
 
 func (a *SemanticAnalyzer) restoreStates(snapshot map[*Symbol]symbolState) {
 	for symbol, state := range snapshot {
-		symbol.Initialized = state.initialized
-		symbol.Used = state.used
+		symbol.Flags.Defined = state.defined
+		symbol.Flags.Initialized = state.initialized
+		symbol.Flags.Used = state.used
 	}
 }
 
@@ -217,20 +229,22 @@ func (a *SemanticAnalyzer) mergeStates(before, left, right map[*Symbol]symbolSta
 	for symbol, state := range before {
 		leftState := left[symbol]
 		if right == nil {
-			symbol.Initialized = state.initialized
-			symbol.Used = state.used || leftState.used
+			symbol.Flags.Defined = state.defined
+			symbol.Flags.Initialized = state.initialized
+			symbol.Flags.Used = state.used || leftState.used
 			continue
 		}
 
 		rightState := right[symbol]
-		symbol.Initialized = leftState.initialized && rightState.initialized
-		symbol.Used = leftState.used || rightState.used
+		symbol.Flags.Defined = leftState.defined && rightState.defined
+		symbol.Flags.Initialized = leftState.initialized && rightState.initialized
+		symbol.Flags.Used = leftState.used || rightState.used
 	}
 }
 
 func (a *SemanticAnalyzer) reportUnusedSymbols() {
 	for _, symbol := range a.allSymbols {
-		if symbol.Used {
+		if !symbol.Flags.Defined || symbol.Flags.Used {
 			continue
 		}
 		a.diagnostics = append(a.diagnostics, SemanticDiagnostic{

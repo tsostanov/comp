@@ -69,6 +69,34 @@ func TestSemanticAnalyzerSameScopeRedeclarationRejected(t *testing.T) {
 	assertHasDiagnostic(t, diagnostics, SeverityError, "already declared in this scope")
 }
 
+func TestSemanticAnalyzerDeclarationSetsDefinedFlag(t *testing.T) {
+	lexer := NewLexer("var x = 1; print x;")
+	tokens, err := lexer.Tokenize()
+	if err != nil {
+		t.Fatalf("tokenize failed: %v", err)
+	}
+
+	parser := NewParser(tokens)
+	statements, err := parser.Parse()
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+
+	analyzer := NewSemanticAnalyzer()
+	analyzer.Analyze(statements)
+
+	symbol := analyzer.allSymbols[0]
+	if !symbol.Flags.Defined {
+		t.Fatalf("expected symbol to be marked as defined")
+	}
+	if !symbol.Flags.Initialized {
+		t.Fatalf("expected symbol to be marked as initialized")
+	}
+	if !symbol.Flags.Used {
+		t.Fatalf("expected symbol to be marked as used")
+	}
+}
+
 func analyzeSource(t *testing.T, source string) []SemanticDiagnostic {
 	t.Helper()
 
