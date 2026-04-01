@@ -1,65 +1,81 @@
 # comp
 
-Небольшой учебный компилятор на Go: лексер, парсер, AST printer и базовый семантический анализатор для простого императивного языка.
+Small educational compiler front-end in Go. It includes:
 
-## Что умеет
+- a lexer;
+- a parser that builds an AST;
+- a text AST printer;
+- a semantic analyzer with scope, initialization, and type checks.
 
-- лексический анализ исходного текста;
-- парсинг выражений и операторов в AST;
-- печать дерева разбора в текстовом виде;
-- семантические проверки по областям видимости и инициализации переменных.
+## Language Features
 
-## Поддерживаемый синтаксис
+The language supports:
 
-Язык поддерживает:
+- variable declarations: `var x: int;`, `var x: int = 10;`, `var x = 10;`
+- assignment: `x = 20;`
+- output: `print x;`
+- blocks: `{ ... }`
+- conditions: `if (...) ... else ...`
+- loops: `while (...) ...`
+- literals: integers, strings, booleans (`true`, `false`)
+- operators: `+`, `-`, `*`, `/`, `!`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `&&`, `||`
 
-- объявления переменных: `var x;`, `var x = 10;`
-- присваивания: `x = 20;`
-- вывод: `print x;`
-- блоки: `{ ... }`
-- условия: `if (...) ... else ...`
-- циклы: `while (...) ...`
-- литералы: числа и строки
-- операции: `+`, `-`, `*`, `/`, `!`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `&&`, `||`
+## Type System
 
-## Семантические проверки
+The language is statically and strictly typed.
 
-Анализатор сообщает о:
+Available types:
 
-- использовании необъявленной переменной;
-- присваивании в необъявленную переменную;
-- использовании переменной до инициализации;
-- повторном объявлении переменной в одном scope;
-- неиспользуемых переменных.
+- `int`
+- `bool`
+- `string`
 
-Особенности анализа потока:
+Rules:
 
-- инициализация после `if/else` считается гарантированной только если переменная инициализируется в обеих ветках;
-- `while` не гарантирует инициализацию после цикла, потому что тело может не выполниться ни разу.
+- a variable must have an explicit type annotation or an initializer
+- if the type is omitted, it is inferred from the initializer
+- assignments must match the declared or inferred type
+- `if` and `while` conditions must be `bool`
+- arithmetic operators work with `int`
+- logical operators work with `bool`
+- `+` supports `int + int` and `string + string`
+- equality operators require both operands to have the same type
 
-## Запуск
+## Semantic Checks
 
-Требования: Go 1.25+.
+The analyzer reports:
 
-Запуск с файлом:
+- use of an undeclared variable
+- assignment to an undeclared variable
+- use before initialization
+- redeclaration in the same scope
+- unused variables
+- type mismatches in declarations and assignments
+- invalid operand types in expressions
+
+## Run
+
+Requirements: Go 1.25+.
+
+Run with a file:
 
 ```bash
 go run . program.txt
 ```
 
-Если путь к файлу не передан, программа использует встроенный пример:
+If no file path is provided, the built-in sample is used:
 
 ```txt
-var x = 123; print x + 5;
+var x: int = 123; print x + 5;
 ```
 
-## Пример входных данных
+## Example Program
 
-Файл `program.txt`:
+`program.txt`:
 
 ```txt
-var x;
-if (1) {
+var x: int;
+if (true) {
     x = 10;
 } else {
     x = 20;
@@ -67,28 +83,7 @@ if (1) {
 print x;
 ```
 
-Вывод программы:
-
-```txt
-Root (Program)
-├── VarStatement: x
-├── IfStatement
-│   ├── Literal: 1
-│   ├── BlockStatement
-│   │   └── ExpressionStatement
-│   │       └── AssignExpression: x =
-│   │           └── Literal: 10
-│   └── BlockStatement
-│       └── ExpressionStatement
-│           └── AssignExpression: x =
-│               └── Literal: 20
-└── PrintStatement
-    └── Variable: x
-```
-
-Если семантический анализ находит ошибки, диагностика печатается в `stderr`, а программа завершается с ненулевым кодом выхода.
-
-## Тесты
+## Tests
 
 ```bash
 go test ./...

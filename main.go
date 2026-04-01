@@ -48,5 +48,5 @@ func readInput() (string, error) {
 		return string(data), nil
 	}
 
-	return "var x = 123; print x + 5;", nil
+	return "var x: int = 123; print x + 5;", nil
 }

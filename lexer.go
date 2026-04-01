@@ -94,7 +94,11 @@ var keywords = map[string]TokenType{
 	"while":  TokenWhile,
 	"and":    TokenAnd,
 	"or":     TokenOr,
-	"string": TokenString,
+	"int":    TokenInt,
+	"bool":   TokenBool,
+	"string": TokenStringType,
+	"true":   TokenTrue,
+	"false":  TokenFalse,
 }
 
 var operators = map[string]TokenType{
@@ -116,6 +120,7 @@ var operators = map[string]TokenType{
 	")":  TokenRParen,
 	"{":  TokenLBrace,
 	"}":  TokenRBrace,
+	":":  TokenColon,
 	";":  TokenSemicolon,
 }
 

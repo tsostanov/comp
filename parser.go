@@ -60,6 +60,14 @@ func (p *Parser) parseVarDeclaration() (Stmt, error) {
 		return nil, err
 	}
 
+	var declaredType *TypeAnnotation
+	if p.match(TokenColon) {
+		declaredType, err = p.parseTypeAnnotation()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	var initializer Expr
 	if p.match(TokenEq) {
 		initializer, err = p.parseExpression()
@@ -72,7 +80,7 @@ func (p *Parser) parseVarDeclaration() (Stmt, error) {
 		return nil, err
 	}
 
-	return VarStmt{Name: name, Initializer: initializer}, nil
+	return VarStmt{Name: name, DeclaredType: declaredType, Initializer: initializer}, nil
 }
 
 func (p *Parser) parsePrintStatement() (Stmt, error) {
@@ -306,7 +314,7 @@ func (p *Parser) parseUnary() (Expr, error) {
 }
 
 func (p *Parser) parsePrimary() (Expr, error) {
-	if p.match(TokenNumber, TokenString) {
+	if p.match(TokenNumber, TokenString, TokenTrue, TokenFalse) {
 		return LiteralExpr{Token: p.previous()}, nil
 	}
 	if p.match(TokenID) {
@@ -328,6 +336,27 @@ func (p *Parser) parsePrimary() (Expr, error) {
 		Message: "expected expression",
 		Line:    token.Line,
 		Column:  token.Column,
+	}
+}
+
+func (p *Parser) parseTypeAnnotation() (*TypeAnnotation, error) {
+	switch {
+	case p.match(TokenInt):
+		token := p.previous()
+		return &TypeAnnotation{Name: token, Kind: TypeInt}, nil
+	case p.match(TokenBool):
+		token := p.previous()
+		return &TypeAnnotation{Name: token, Kind: TypeBool}, nil
+	case p.match(TokenStringType):
+		token := p.previous()
+		return &TypeAnnotation{Name: token, Kind: TypeString}, nil
+	default:
+		token := p.peek()
+		return nil, ParseError{
+			Message: "expected type name",
+			Line:    token.Line,
+			Column:  token.Column,
+		}
 	}
 }
 

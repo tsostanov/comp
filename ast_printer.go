@@ -40,7 +40,11 @@ func (p *AstPrinter) printNode(b *strings.Builder, node any, indent string, isLa
 
 	switch n := node.(type) {
 	case VarStmt:
-		fmt.Fprintf(b, "VarStatement: %s\n", n.Name.Value)
+		if n.DeclaredType != nil {
+			fmt.Fprintf(b, "VarStatement: %s : %s\n", n.Name.Value, n.DeclaredType.Kind.String())
+		} else {
+			fmt.Fprintf(b, "VarStatement: %s\n", n.Name.Value)
+		}
 		if n.Initializer != nil {
 			p.printNode(b, n.Initializer, childIndent, true)
 		}

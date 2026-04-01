@@ -8,11 +8,16 @@ const (
 	TokenNumber TokenType = iota
 	TokenID
 	TokenString
+	TokenTrue
+	TokenFalse
 	TokenVar
 	TokenPrint
 	TokenIf
 	TokenElse
 	TokenWhile
+	TokenInt
+	TokenBool
+	TokenStringType
 	TokenPlus
 	TokenMinus
 	TokenStar
@@ -31,6 +36,7 @@ const (
 	TokenRParen
 	TokenLBrace
 	TokenRBrace
+	TokenColon
 	TokenSemicolon
 	TokenEOF
 )
@@ -39,11 +45,16 @@ var tokenTypeNames = []string{
 	"NUMBER",
 	"ID",
 	"STRING",
+	"TRUE",
+	"FALSE",
 	"VAR",
 	"PRINT",
 	"IF",
 	"ELSE",
 	"WHILE",
+	"INT",
+	"BOOL",
+	"STRING_TYPE",
 	"PLUS",
 	"MINUS",
 	"STAR",
@@ -62,6 +73,7 @@ var tokenTypeNames = []string{
 	"RPAREN",
 	"LBRACE",
 	"RBRACE",
+	"COLON",
 	"SEMICOLON",
 	"EOF",
 }

@@ -49,8 +49,9 @@ type GroupingExpr struct {
 func (GroupingExpr) exprNode() {}
 
 type VarStmt struct {
-	Name        Token
-	Initializer Expr
+	Name         Token
+	DeclaredType *TypeAnnotation
+	Initializer  Expr
 }
 
 func (VarStmt) stmtNode() {}
