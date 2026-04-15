@@ -7,6 +7,16 @@ Small educational compiler front-end in Go. It includes:
 - a text AST printer;
 - a semantic analyzer with scope, initialization, and type checks.
 
+## Project Layout
+
+- `cmd/comp` - CLI entry point
+- `internal/token` - token types and token metadata
+- `internal/lexer` - lexical analysis
+- `internal/parser` - syntax analysis
+- `internal/ast` - AST nodes and AST printer
+- `internal/semantic` - semantic analysis
+- `examples` - sample input programs
+
 ## Language Features
 
 The language supports:
@@ -60,7 +70,7 @@ Requirements: Go 1.25+.
 Run with a file:
 
 ```bash
-go run . program.txt
+go run ./cmd/comp examples/program.txt
 ```
 
 If no file path is provided, the built-in sample is used:
@@ -71,7 +81,7 @@ var x: int = 123; print x + 5;
 
 ## Example Program
 
-`program.txt`:
+`examples/program.txt`:
 
 ```txt
 var x: int;

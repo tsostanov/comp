@@ -1,4 +1,6 @@
-package main
+package ast
+
+import tok "comp/internal/token"
 
 type ValueType int
 
@@ -23,6 +25,6 @@ func (t ValueType) String() string {
 }
 
 type TypeAnnotation struct {
-	Name Token
+	Name tok.Token
 	Kind ValueType
 }

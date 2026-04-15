@@ -1,6 +1,10 @@
-package main
+package lexer
 
-import "fmt"
+import (
+	"fmt"
+
+	tok "comp/internal/token"
+)
 
 type Lexer struct {
 	input    string
@@ -19,10 +23,10 @@ func NewLexer(input string) *Lexer {
 	}
 }
 
-func (l *Lexer) Tokenize() ([]Token, error) {
-	var result []Token
-	err := l.TokenizeEach(func(tok Token) bool {
-		result = append(result, tok)
+func (l *Lexer) Tokenize() ([]tok.Token, error) {
+	var result []tok.Token
+	err := l.TokenizeEach(func(token tok.Token) bool {
+		result = append(result, token)
 		return true
 	})
 	if err != nil {
@@ -32,7 +36,7 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 	return result, nil
 }
 
-func (l *Lexer) TokenizeEach(yield func(Token) bool) error {
+func (l *Lexer) TokenizeEach(yield func(tok.Token) bool) error {
 	for l.position < l.length {
 		current := l.Peek()
 
@@ -75,8 +79,8 @@ func (l *Lexer) TokenizeEach(yield func(Token) bool) error {
 		}
 	}
 
-	eofToken := Token{
-		Type:     TokenEOF,
+	eofToken := tok.Token{
+		Type:     tok.TokenEOF,
 		Value:    "",
 		Position: l.position,
 		Line:     l.line,
@@ -86,45 +90,45 @@ func (l *Lexer) TokenizeEach(yield func(Token) bool) error {
 	return nil
 }
 
-var keywords = map[string]TokenType{
-	"var":    TokenVar,
-	"print":  TokenPrint,
-	"if":     TokenIf,
-	"else":   TokenElse,
-	"while":  TokenWhile,
-	"and":    TokenAnd,
-	"or":     TokenOr,
-	"int":    TokenInt,
-	"bool":   TokenBool,
-	"string": TokenStringType,
-	"true":   TokenTrue,
-	"false":  TokenFalse,
+var keywords = map[string]tok.TokenType{
+	"var":    tok.TokenVar,
+	"print":  tok.TokenPrint,
+	"if":     tok.TokenIf,
+	"else":   tok.TokenElse,
+	"while":  tok.TokenWhile,
+	"and":    tok.TokenAnd,
+	"or":     tok.TokenOr,
+	"int":    tok.TokenInt,
+	"bool":   tok.TokenBool,
+	"string": tok.TokenStringType,
+	"true":   tok.TokenTrue,
+	"false":  tok.TokenFalse,
 }
 
-var operators = map[string]TokenType{
-	"==": TokenEqEq,
-	"!=": TokenNeq,
-	"<=": TokenLtEq,
-	">=": TokenGtEq,
-	"&&": TokenAnd,
-	"||": TokenOr,
-	"+":  TokenPlus,
-	"-":  TokenMinus,
-	"*":  TokenStar,
-	"/":  TokenSlash,
-	"=":  TokenEq,
-	"<":  TokenLt,
-	">":  TokenGt,
-	"!":  TokenExcl,
-	"(":  TokenLParen,
-	")":  TokenRParen,
-	"{":  TokenLBrace,
-	"}":  TokenRBrace,
-	":":  TokenColon,
-	";":  TokenSemicolon,
+var operators = map[string]tok.TokenType{
+	"==": tok.TokenEqEq,
+	"!=": tok.TokenNeq,
+	"<=": tok.TokenLtEq,
+	">=": tok.TokenGtEq,
+	"&&": tok.TokenAnd,
+	"||": tok.TokenOr,
+	"+":  tok.TokenPlus,
+	"-":  tok.TokenMinus,
+	"*":  tok.TokenStar,
+	"/":  tok.TokenSlash,
+	"=":  tok.TokenEq,
+	"<":  tok.TokenLt,
+	">":  tok.TokenGt,
+	"!":  tok.TokenExcl,
+	"(":  tok.TokenLParen,
+	")":  tok.TokenRParen,
+	"{":  tok.TokenLBrace,
+	"}":  tok.TokenRBrace,
+	":":  tok.TokenColon,
+	";":  tok.TokenSemicolon,
 }
 
-func (l *Lexer) readNumber() Token {
+func (l *Lexer) readNumber() tok.Token {
 	start := l.position
 	startLine := l.line
 	startCol := l.column
@@ -134,8 +138,8 @@ func (l *Lexer) readNumber() Token {
 	}
 
 	numberStr := l.input[start:l.position]
-	return Token{
-		Type:     TokenNumber,
+	return tok.Token{
+		Type:     tok.TokenNumber,
 		Value:    numberStr,
 		Position: start,
 		Line:     startLine,
@@ -143,7 +147,7 @@ func (l *Lexer) readNumber() Token {
 	}
 }
 
-func (l *Lexer) readWord() Token {
+func (l *Lexer) readWord() tok.Token {
 	start := l.position
 	startLine := l.line
 	startCol := l.column
@@ -153,12 +157,12 @@ func (l *Lexer) readWord() Token {
 	}
 
 	word := l.input[start:l.position]
-	tokenType := TokenID
+	tokenType := tok.TokenID
 	if kwType, ok := keywords[word]; ok {
 		tokenType = kwType
 	}
 
-	return Token{
+	return tok.Token{
 		Type:     tokenType,
 		Value:    word,
 		Position: start,
@@ -167,7 +171,7 @@ func (l *Lexer) readWord() Token {
 	}
 }
 
-func (l *Lexer) readString() (Token, error) {
+func (l *Lexer) readString() (tok.Token, error) {
 	start := l.position
 	startLine := l.line
 	startCol := l.column
@@ -178,13 +182,13 @@ func (l *Lexer) readString() (Token, error) {
 	}
 
 	if l.position >= l.length {
-		return Token{}, fmt.Errorf("unterminated string at %d:%d", startLine, startCol)
+		return tok.Token{}, fmt.Errorf("unterminated string at %d:%d", startLine, startCol)
 	}
 
 	l.Next()
 	value := l.input[start+1 : l.position-1]
-	return Token{
-		Type:     TokenString,
+	return tok.Token{
+		Type:     tok.TokenString,
 		Value:    value,
 		Position: start,
 		Line:     startLine,
@@ -192,7 +196,7 @@ func (l *Lexer) readString() (Token, error) {
 	}, nil
 }
 
-func (l *Lexer) readOperatorOrPunctuation() (Token, error) {
+func (l *Lexer) readOperatorOrPunctuation() (tok.Token, error) {
 	start := l.position
 	startLine := l.line
 	startCol := l.column
@@ -202,7 +206,7 @@ func (l *Lexer) readOperatorOrPunctuation() (Token, error) {
 		if tokenType, ok := operators[twoChars]; ok {
 			l.Next()
 			l.Next()
-			return Token{
+			return tok.Token{
 				Type:     tokenType,
 				Value:    twoChars,
 				Position: start,
@@ -215,7 +219,7 @@ func (l *Lexer) readOperatorOrPunctuation() (Token, error) {
 	oneChar := l.input[l.position : l.position+1]
 	if tokenType, ok := operators[oneChar]; ok {
 		l.Next()
-		return Token{
+		return tok.Token{
 			Type:     tokenType,
 			Value:    oneChar,
 			Position: start,
@@ -224,7 +228,7 @@ func (l *Lexer) readOperatorOrPunctuation() (Token, error) {
 		}, nil
 	}
 
-	return Token{}, fmt.Errorf("unexpected character '%c' at %d:%d", l.Peek(), startLine, startCol)
+	return tok.Token{}, fmt.Errorf("unexpected character '%c' at %d:%d", l.Peek(), startLine, startCol)
 }
 
 func (l *Lexer) Peek() byte {

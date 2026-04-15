@@ -1,6 +1,10 @@
 package main
 
 import (
+	"comp/internal/ast"
+	"comp/internal/lexer"
+	"comp/internal/parser"
+	"comp/internal/semantic"
 	"fmt"
 	"os"
 )
@@ -12,21 +16,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	lexer := NewLexer(input)
+	lexer := lexer.NewLexer(input)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	parser := NewParser(tokens)
+	parser := parser.NewParser(tokens)
 	statements, err := parser.Parse()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	analyzer := NewSemanticAnalyzer()
+	analyzer := semantic.NewSemanticAnalyzer()
 	analyzer.Analyze(statements)
 	for _, diagnostic := range analyzer.Diagnostics() {
 		fmt.Fprintln(os.Stderr, diagnostic)
@@ -35,7 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	printer := NewAstPrinter()
+	printer := ast.NewAstPrinter()
 	fmt.Print(printer.Print(statements))
 }
 

@@ -1,4 +1,6 @@
-package main
+package ast
+
+import tok "comp/internal/token"
 
 type Expr interface {
 	exprNode()
@@ -9,19 +11,19 @@ type Stmt interface {
 }
 
 type LiteralExpr struct {
-	Token Token
+	Token tok.Token
 }
 
 func (LiteralExpr) exprNode() {}
 
 type VariableExpr struct {
-	Name Token
+	Name tok.Token
 }
 
 func (VariableExpr) exprNode() {}
 
 type UnaryExpr struct {
-	Operator Token
+	Operator tok.Token
 	Right    Expr
 }
 
@@ -29,14 +31,14 @@ func (UnaryExpr) exprNode() {}
 
 type BinaryExpr struct {
 	Left     Expr
-	Operator Token
+	Operator tok.Token
 	Right    Expr
 }
 
 func (BinaryExpr) exprNode() {}
 
 type AssignExpr struct {
-	Name  Token
+	Name  tok.Token
 	Value Expr
 }
 
@@ -49,7 +51,7 @@ type GroupingExpr struct {
 func (GroupingExpr) exprNode() {}
 
 type VarStmt struct {
-	Name         Token
+	Name         tok.Token
 	DeclaredType *TypeAnnotation
 	Initializer  Expr
 }

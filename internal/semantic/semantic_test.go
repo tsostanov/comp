@@ -1,15 +1,19 @@
-package main
+package semantic
 
 import (
+	"comp/internal/ast"
+	"comp/internal/lexer"
+	"comp/internal/parser"
+	tok "comp/internal/token"
 	"strings"
 	"testing"
 )
 
 func TestSemanticEnvironmentDefineAndResolveVariable(t *testing.T) {
 	global := NewSemanticEnvironment(nil)
-	token := Token{Value: "x", Line: 1, Column: 5}
+	token := tok.Token{Value: "x", Line: 1, Column: 5}
 
-	variable, ok := global.DefineVariable(token, TypeInt)
+	variable, ok := global.DefineVariable(token, ast.TypeInt)
 	if !ok {
 		t.Fatalf("expected variable definition to succeed")
 	}
@@ -29,12 +33,12 @@ func TestSemanticEnvironmentDefineAndResolveVariable(t *testing.T) {
 
 func TestSemanticEnvironmentRejectsSameScopeRedeclaration(t *testing.T) {
 	environment := NewSemanticEnvironment(nil)
-	token := Token{Value: "x", Line: 1, Column: 5}
+	token := tok.Token{Value: "x", Line: 1, Column: 5}
 
-	if _, ok := environment.DefineVariable(token, TypeInt); !ok {
+	if _, ok := environment.DefineVariable(token, ast.TypeInt); !ok {
 		t.Fatalf("expected first declaration to succeed")
 	}
-	if _, ok := environment.DefineVariable(token, TypeInt); ok {
+	if _, ok := environment.DefineVariable(token, ast.TypeInt); ok {
 		t.Fatalf("expected second declaration in same scope to fail")
 	}
 }
@@ -62,6 +66,12 @@ func TestSemanticAnalyzerAssignmentMarksVariableInitialized(t *testing.T) {
 	diagnostics := analyzeSource(t, "var x: int; x = 1; print x;")
 
 	assertNoDiagnostic(t, diagnostics, SeverityError, "used before initialization")
+}
+
+func TestSemanticAnalyzerAllowsReassignmentWithSameType(t *testing.T) {
+	diagnostics := analyzeSource(t, "var x: int = 1; x = 2; print x;")
+
+	assertNoDiagnostic(t, diagnostics, SeverityError, "cannot assign")
 }
 
 func TestSemanticAnalyzerIfElsePropagatesInitialization(t *testing.T) {
@@ -170,16 +180,48 @@ func TestSemanticAnalyzerAllowsStringConcatenation(t *testing.T) {
 	assertNoDiagnostic(t, diagnostics, SeverityError, "operator +")
 }
 
+func TestSemanticAnalyzerRejectsIntAndStringAddition(t *testing.T) {
+	diagnostics := analyzeSource(t, `print 1 + "a"; print "a" + 1;`)
+
+	assertHasDiagnostic(t, diagnostics, SeverityError, "operator + expects operands of type int or string")
+}
+
+func TestSemanticAnalyzerAllowsStringEqualityComparisons(t *testing.T) {
+	diagnostics := analyzeSource(t, `
+if ("a" == "b") {
+	print "eq";
+}
+if ("a" != "b") {
+	print "neq";
+}
+`)
+
+	assertNoDiagnostic(t, diagnostics, SeverityError, "equality operators require operands of the same type")
+	assertNoDiagnostic(t, diagnostics, SeverityError, "if condition must have type bool")
+}
+
+func TestSemanticAnalyzerRejectsStringOrderingComparisons(t *testing.T) {
+	diagnostics := analyzeSource(t, `print "a" < "b"; print "a" >= "b";`)
+
+	assertHasDiagnostic(t, diagnostics, SeverityError, "comparison operators expect operands of type int")
+}
+
+func TestSemanticAnalyzerRejectsStringConditionInIf(t *testing.T) {
+	diagnostics := analyzeSource(t, `if ("a" + "b") { print 1; }`)
+
+	assertHasDiagnostic(t, diagnostics, SeverityError, "if condition must have type bool")
+}
+
 func analyzeSource(t *testing.T, source string) []SemanticDiagnostic {
 	t.Helper()
 
-	lexer := NewLexer(source)
+	lexer := lexer.NewLexer(source)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		t.Fatalf("tokenize failed: %v", err)
 	}
 
-	parser := NewParser(tokens)
+	parser := parser.NewParser(tokens)
 	statements, err := parser.Parse()
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)

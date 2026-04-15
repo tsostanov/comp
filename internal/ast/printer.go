@@ -1,6 +1,7 @@
-package main
+package ast
 
 import (
+	tok "comp/internal/token"
 	"fmt"
 	"strings"
 )
@@ -93,9 +94,9 @@ func (p *AstPrinter) printNode(b *strings.Builder, node any, indent string, isLa
 	}
 }
 
-func formatLiteral(tok Token) string {
-	if tok.Type == TokenString {
-		return fmt.Sprintf("%q", tok.Value)
+func formatLiteral(token tok.Token) string {
+	if token.Type == tok.TokenString {
+		return fmt.Sprintf("%q", token.Value)
 	}
-	return tok.Value
+	return token.Value
 }

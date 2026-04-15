@@ -1,7 +1,0 @@
-var x: int;
-if (true) {
-    x = 10;
-} else {
-    x = 20;
-}
-print x;
