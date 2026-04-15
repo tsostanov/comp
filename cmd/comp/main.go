@@ -2,6 +2,7 @@ package main
 
 import (
 	"comp/internal/ast"
+	"comp/internal/executor"
 	"comp/internal/lexer"
 	"comp/internal/parser"
 	"comp/internal/semantic"
@@ -10,21 +11,27 @@ import (
 )
 
 func main() {
-	input, err := readInput()
+	options, err := parseOptions(os.Args[1:])
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	lexer := lexer.NewLexer(input)
-	tokens, err := lexer.Tokenize()
+	input, err := readInput(options.filePath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	parser := parser.NewParser(tokens)
-	statements, err := parser.Parse()
+	lex := lexer.NewLexer(input)
+	tokens, err := lex.Tokenize()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	parse := parser.NewParser(tokens)
+	statements, err := parse.Parse()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -39,13 +46,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	printer := ast.NewAstPrinter()
-	fmt.Print(printer.Print(statements))
+	if options.printAST {
+		printer := ast.NewAstPrinter()
+		fmt.Print(printer.Print(statements))
+		return
+	}
+
+	run := executor.NewExecutor(os.Stdout)
+	if err := run.Execute(statements); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
-func readInput() (string, error) {
-	if len(os.Args) > 1 {
-		data, err := os.ReadFile(os.Args[1])
+type cliOptions struct {
+	filePath string
+	printAST bool
+}
+
+func parseOptions(args []string) (cliOptions, error) {
+	var options cliOptions
+	for _, arg := range args {
+		switch arg {
+		case "--ast":
+			options.printAST = true
+		default:
+			if len(arg) > 0 && arg[0] == '-' {
+				return cliOptions{}, fmt.Errorf("unknown option: %s", arg)
+			}
+			if options.filePath != "" {
+				return cliOptions{}, fmt.Errorf("multiple input files are not supported")
+			}
+			options.filePath = arg
+		}
+	}
+	return options, nil
+}
+
+func readInput(filePath string) (string, error) {
+	if filePath != "" {
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return "", err
 		}

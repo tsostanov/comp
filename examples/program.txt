@@ -1,2 +1,22 @@
-var x: int = 10;
-x + "a";
+var a: int = 10;
+var b: int = 4;
+var total = a * (b + 2) - 3;
+var isLarge: bool = total >= 20 and a != b;
+
+if (isLarge) {
+	print "large";
+} else {
+	print "small";
+}
+
+if (a > b) {
+	print total;
+} else {
+	print a + b;
+}
+
+var counter: int = 0;
+while (counter < 3) {
+	print counter;
+	counter = counter + 1;
+}

@@ -5,7 +5,8 @@ Small educational compiler front-end in Go. It includes:
 - a lexer;
 - a parser that builds an AST;
 - a text AST printer;
-- a semantic analyzer with scope, initialization, and type checks.
+- a semantic analyzer with scope, initialization, and type checks;
+- an AST-based interpreter/executor.
 
 ## Project Layout
 
@@ -15,6 +16,7 @@ Small educational compiler front-end in Go. It includes:
 - `internal/parser` - syntax analysis
 - `internal/ast` - AST nodes and AST printer
 - `internal/semantic` - semantic analysis
+- `internal/executor` - AST execution/runtime
 - `examples` - sample input programs
 
 ## Language Features
@@ -77,6 +79,12 @@ If no file path is provided, the built-in sample is used:
 
 ```txt
 var x: int = 123; print x + 5;
+```
+
+Print the AST instead of executing:
+
+```bash
+go run ./cmd/comp --ast examples/program.txt
 ```
 
 ## Example Program
