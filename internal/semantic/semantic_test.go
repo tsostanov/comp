@@ -212,6 +212,61 @@ func TestSemanticAnalyzerRejectsStringConditionInIf(t *testing.T) {
 	assertHasDiagnostic(t, diagnostics, SeverityError, "if condition must have type bool")
 }
 
+func TestSemanticAnalyzerAllowsFunctionDeclarationAndCall(t *testing.T) {
+	diagnostics := analyzeSource(t, `
+func add(a: int, b: int): int {
+	return a + b;
+}
+
+print add(1, 2);
+`)
+
+	assertNoDiagnostic(t, diagnostics, SeverityError, "call to undeclared function")
+	assertNoDiagnostic(t, diagnostics, SeverityError, "cannot return")
+}
+
+func TestSemanticAnalyzerAllowsCallBeforeFunctionDeclaration(t *testing.T) {
+	diagnostics := analyzeSource(t, `
+print twice(3);
+
+func twice(value: int): int {
+	return value * 2;
+}
+`)
+
+	assertNoDiagnostic(t, diagnostics, SeverityError, "call to undeclared function")
+}
+
+func TestSemanticAnalyzerRejectsWrongFunctionArgumentType(t *testing.T) {
+	diagnostics := analyzeSource(t, `
+func negate(flag: bool): bool {
+	return !flag;
+}
+
+print negate(1);
+`)
+
+	assertHasDiagnostic(t, diagnostics, SeverityError, "cannot pass value of type int to parameter flag of type bool")
+}
+
+func TestSemanticAnalyzerRejectsReturnOutsideFunction(t *testing.T) {
+	diagnostics := analyzeSource(t, `return 1;`)
+
+	assertHasDiagnostic(t, diagnostics, SeverityError, "return statement is only allowed inside functions")
+}
+
+func TestSemanticAnalyzerRejectsFunctionWithoutGuaranteedReturn(t *testing.T) {
+	diagnostics := analyzeSource(t, `
+func maybe(value: int): int {
+	if (value > 0) {
+		return value;
+	}
+}
+`)
+
+	assertHasDiagnostic(t, diagnostics, SeverityError, "may not return a value on all paths")
+}
+
 func analyzeSource(t *testing.T, source string) []SemanticDiagnostic {
 	t.Helper()
 

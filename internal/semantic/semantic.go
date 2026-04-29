@@ -37,15 +37,30 @@ type VariableInfo struct {
 	Flags      SymbolFlags
 }
 
+type ParameterInfo struct {
+	Name       string
+	DeclaredAt tok.Token
+	Type       ast.ValueType
+}
+
+type FunctionInfo struct {
+	Name       string
+	DeclaredAt tok.Token
+	ReturnType ast.ValueType
+	Parameters []ParameterInfo
+}
+
 type SemanticEnvironment struct {
 	parent    *SemanticEnvironment
 	variables map[string]*VariableInfo
+	functions map[string]*FunctionInfo
 }
 
 func NewSemanticEnvironment(parent *SemanticEnvironment) *SemanticEnvironment {
 	return &SemanticEnvironment{
 		parent:    parent,
 		variables: make(map[string]*VariableInfo),
+		functions: make(map[string]*FunctionInfo),
 	}
 }
 
@@ -55,6 +70,9 @@ func (e *SemanticEnvironment) Parent() *SemanticEnvironment {
 
 func (e *SemanticEnvironment) DefineVariable(name tok.Token, variableType ast.ValueType) (*VariableInfo, bool) {
 	if _, exists := e.variables[name.Value]; exists {
+		return nil, false
+	}
+	if _, exists := e.functions[name.Value]; exists {
 		return nil, false
 	}
 
@@ -79,9 +97,35 @@ func (e *SemanticEnvironment) ResolveVariable(name string) *VariableInfo {
 	return nil
 }
 
-func (e *SemanticEnvironment) IsVariableDefined(name string) bool {
-	variable := e.ResolveVariable(name)
-	return variable != nil && variable.Flags.Defined
+func (e *SemanticEnvironment) DefineFunction(name tok.Token, returnType ast.ValueType, parameters []ParameterInfo) (*FunctionInfo, bool) {
+	if _, exists := e.functions[name.Value]; exists {
+		return nil, false
+	}
+	if _, exists := e.variables[name.Value]; exists {
+		return nil, false
+	}
+
+	function := &FunctionInfo{
+		Name:       name.Value,
+		DeclaredAt: name,
+		ReturnType: returnType,
+		Parameters: parameters,
+	}
+	e.functions[name.Value] = function
+	return function, true
+}
+
+func (e *SemanticEnvironment) ResolveFunction(name string) *FunctionInfo {
+	for current := e; current != nil; current = current.parent {
+		if function, ok := current.functions[name]; ok {
+			return function
+		}
+	}
+	return nil
+}
+
+func (e *SemanticEnvironment) ResolveFunctionInCurrentScope(name string) *FunctionInfo {
+	return e.functions[name]
 }
 
 type variableState struct {
@@ -91,9 +135,10 @@ type variableState struct {
 }
 
 type SemanticAnalyzer struct {
-	environment *SemanticEnvironment
-	variables   []*VariableInfo
-	diagnostics []SemanticDiagnostic
+	environment     *SemanticEnvironment
+	variables       []*VariableInfo
+	diagnostics     []SemanticDiagnostic
+	currentFunction *FunctionInfo
 }
 
 func NewSemanticAnalyzer() *SemanticAnalyzer {
@@ -103,46 +148,67 @@ func NewSemanticAnalyzer() *SemanticAnalyzer {
 }
 
 func (a *SemanticAnalyzer) Analyze(statements []ast.Stmt) []SemanticDiagnostic {
+	a.analyzeStatements(statements)
+	a.reportUnusedVariables()
+	return a.diagnostics
+}
+
+func (a *SemanticAnalyzer) analyzeStatements(statements []ast.Stmt) {
+	a.predeclareFunctions(statements)
 	for _, statement := range statements {
 		a.VisitStatement(statement)
 	}
-	a.reportUnusedVariables()
-	return a.diagnostics
+}
+
+func (a *SemanticAnalyzer) predeclareFunctions(statements []ast.Stmt) {
+	for _, statement := range statements {
+		function, ok := statement.(ast.FuncStmt)
+		if !ok {
+			continue
+		}
+		a.defineFunctionSignature(function)
+	}
+}
+
+func (a *SemanticAnalyzer) defineFunctionSignature(statement ast.FuncStmt) *FunctionInfo {
+	parameters := make([]ParameterInfo, 0, len(statement.Parameters))
+	for _, parameter := range statement.Parameters {
+		parameters = append(parameters, ParameterInfo{
+			Name:       parameter.Name.Value,
+			DeclaredAt: parameter.Name,
+			Type:       parameter.Type.Kind,
+		})
+	}
+
+	function, ok := a.environment.DefineFunction(statement.Name, statement.ReturnType.Kind, parameters)
+	if !ok {
+		a.errorAt(statement.Name, "name "+statement.Name.Value+" is already declared in this scope")
+		return nil
+	}
+	return function
 }
 
 func (a *SemanticAnalyzer) VisitStatement(statement ast.Stmt) {
 	switch s := statement.(type) {
 	case ast.VarStmt:
-		declaredType := ast.TypeUnknown
-		if s.DeclaredType != nil {
-			declaredType = s.DeclaredType.Kind
+		a.visitVarStatement(s)
+	case ast.FuncStmt:
+		function := a.environment.ResolveFunctionInCurrentScope(s.Name.Value)
+		if function == nil {
+			function = a.defineFunctionSignature(s)
 		}
-
-		initializerType := ast.TypeUnknown
-		if s.Initializer != nil {
-			initializerType = a.VisitExpression(s.Initializer)
-		}
-
-		variableType := declaredType
-		if variableType == ast.TypeUnknown {
-			variableType = initializerType
-		}
-
-		variable, ok := a.environment.DefineVariable(s.Name, variableType)
-		if !ok {
-			a.errorAt(s.Name, "variable "+s.Name.Value+" is already declared in this scope")
+		if function == nil {
 			return
 		}
-		a.variables = append(a.variables, variable)
-
-		if s.DeclaredType == nil && s.Initializer == nil {
-			a.errorAt(s.Name, "variable "+s.Name.Value+" requires an explicit type or initializer")
+		a.visitFunctionBody(s, function)
+	case ast.ReturnStmt:
+		if a.currentFunction == nil {
+			a.errorAt(s.Keyword, "return statement is only allowed inside functions")
+			return
 		}
-		if declaredType != ast.TypeUnknown && initializerType != ast.TypeUnknown && !a.isAssignable(declaredType, initializerType) {
-			a.errorAt(s.Name, "cannot initialize variable "+s.Name.Value+" of type "+declaredType.String()+" with value of type "+initializerType.String())
-		}
-		if s.Initializer != nil {
-			variable.Flags.Initialized = true
+		valueType := a.VisitExpression(s.Value)
+		if !a.isAssignable(a.currentFunction.ReturnType, valueType) {
+			a.errorAt(s.Keyword, "cannot return value of type "+valueType.String()+" from function "+a.currentFunction.Name+" with return type "+a.currentFunction.ReturnType.String())
 		}
 	case ast.PrintStmt:
 		a.VisitExpression(s.Expression)
@@ -151,11 +217,7 @@ func (a *SemanticAnalyzer) VisitStatement(statement ast.Stmt) {
 	case ast.BlockStmt:
 		previousEnvironment := a.environment
 		a.environment = NewSemanticEnvironment(previousEnvironment)
-
-		for _, nested := range s.Statements {
-			a.VisitStatement(nested)
-		}
-
+		a.analyzeStatements(s.Statements)
 		a.environment = previousEnvironment
 	case ast.IfStmt:
 		conditionType := a.VisitExpression(s.Condition)
@@ -192,6 +254,68 @@ func (a *SemanticAnalyzer) VisitStatement(statement ast.Stmt) {
 			variable.Flags.Initialized = state.initialized
 			variable.Flags.Used = state.used || body.used
 		}
+	}
+}
+
+func (a *SemanticAnalyzer) visitVarStatement(statement ast.VarStmt) {
+	declaredType := ast.TypeUnknown
+	if statement.DeclaredType != nil {
+		declaredType = statement.DeclaredType.Kind
+	}
+
+	initializerType := ast.TypeUnknown
+	if statement.Initializer != nil {
+		initializerType = a.VisitExpression(statement.Initializer)
+	}
+
+	variableType := declaredType
+	if variableType == ast.TypeUnknown {
+		variableType = initializerType
+	}
+
+	variable, ok := a.environment.DefineVariable(statement.Name, variableType)
+	if !ok {
+		a.errorAt(statement.Name, "name "+statement.Name.Value+" is already declared in this scope")
+		return
+	}
+	a.variables = append(a.variables, variable)
+
+	if statement.DeclaredType == nil && statement.Initializer == nil {
+		a.errorAt(statement.Name, "variable "+statement.Name.Value+" requires an explicit type or initializer")
+	}
+	if declaredType != ast.TypeUnknown && initializerType != ast.TypeUnknown && !a.isAssignable(declaredType, initializerType) {
+		a.errorAt(statement.Name, "cannot initialize variable "+statement.Name.Value+" of type "+declaredType.String()+" with value of type "+initializerType.String())
+	}
+	if statement.Initializer != nil {
+		variable.Flags.Initialized = true
+	}
+}
+
+func (a *SemanticAnalyzer) visitFunctionBody(statement ast.FuncStmt, function *FunctionInfo) {
+	previousEnvironment := a.environment
+	previousFunction := a.currentFunction
+
+	a.environment = NewSemanticEnvironment(previousEnvironment)
+	a.currentFunction = function
+	defer func() {
+		a.environment = previousEnvironment
+		a.currentFunction = previousFunction
+	}()
+
+	for _, parameter := range statement.Parameters {
+		variable, ok := a.environment.DefineVariable(parameter.Name, parameter.Type.Kind)
+		if !ok {
+			a.errorAt(parameter.Name, "name "+parameter.Name.Value+" is already declared in this scope")
+			continue
+		}
+		variable.Flags.Initialized = true
+		a.variables = append(a.variables, variable)
+	}
+
+	a.analyzeStatements(statement.Body.Statements)
+
+	if !guaranteesReturnBlock(statement.Body) {
+		a.errorAt(statement.Name, "function "+statement.Name.Value+" may not return a value on all paths")
 	}
 }
 
@@ -234,8 +358,47 @@ func (a *SemanticAnalyzer) VisitExpression(expression ast.Expr) ast.ValueType {
 		return a.checkUnaryExpression(e, rightType)
 	case ast.GroupingExpr:
 		return a.VisitExpression(e.Expression)
+	case ast.CallExpr:
+		return a.visitCallExpression(e)
 	}
 	return ast.TypeUnknown
+}
+
+func (a *SemanticAnalyzer) visitCallExpression(expression ast.CallExpr) ast.ValueType {
+	callee, ok := expression.Callee.(ast.VariableExpr)
+	if !ok {
+		a.errorAt(expression.Paren, "can only call named functions")
+		for _, argument := range expression.Arguments {
+			a.VisitExpression(argument)
+		}
+		return ast.TypeUnknown
+	}
+
+	function := a.environment.ResolveFunction(callee.Name.Value)
+	if function == nil {
+		a.errorAt(callee.Name, "call to undeclared function "+callee.Name.Value)
+		for _, argument := range expression.Arguments {
+			a.VisitExpression(argument)
+		}
+		return ast.TypeUnknown
+	}
+
+	if len(expression.Arguments) != len(function.Parameters) {
+		a.errorAt(callee.Name, fmt.Sprintf("function %s expects %d arguments, got %d", function.Name, len(function.Parameters), len(expression.Arguments)))
+	}
+
+	for index, argument := range expression.Arguments {
+		argumentType := a.VisitExpression(argument)
+		if index >= len(function.Parameters) {
+			continue
+		}
+		parameter := function.Parameters[index]
+		if !a.isAssignable(parameter.Type, argumentType) {
+			a.errorAt(expressionToken(argument), "cannot pass value of type "+argumentType.String()+" to parameter "+parameter.Name+" of type "+parameter.Type.String())
+		}
+	}
+
+	return function.ReturnType
 }
 
 func (a *SemanticAnalyzer) HasErrors() bool {
@@ -391,6 +554,28 @@ func (a *SemanticAnalyzer) checkBinaryExpression(expression ast.BinaryExpr, left
 	}
 }
 
+func guaranteesReturnBlock(block ast.BlockStmt) bool {
+	for _, statement := range block.Statements {
+		if guaranteesReturnStatement(statement) {
+			return true
+		}
+	}
+	return false
+}
+
+func guaranteesReturnStatement(statement ast.Stmt) bool {
+	switch s := statement.(type) {
+	case ast.ReturnStmt:
+		return true
+	case ast.BlockStmt:
+		return guaranteesReturnBlock(s)
+	case ast.IfStmt:
+		return s.ElseBranch != nil && guaranteesReturnStatement(s.ThenBranch) && guaranteesReturnStatement(s.ElseBranch)
+	default:
+		return false
+	}
+}
+
 func literalType(token tok.Token) ast.ValueType {
 	switch token.Type {
 	case tok.TokenNumber:
@@ -414,6 +599,8 @@ func expressionToken(expression ast.Expr) tok.Token {
 		return e.Operator
 	case ast.BinaryExpr:
 		return e.Operator
+	case ast.CallExpr:
+		return e.Paren
 	case ast.AssignExpr:
 		return e.Name
 	case ast.GroupingExpr:

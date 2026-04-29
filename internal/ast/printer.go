@@ -72,10 +72,32 @@ func (p *AstPrinter) printNode(b *strings.Builder, node any, indent string, isLa
 		b.WriteString("WhileStatement\n")
 		p.printNode(b, n.Condition, childIndent, false)
 		p.printNode(b, n.Body, childIndent, true)
+	case FuncStmt:
+		fmt.Fprintf(b, "FunctionStatement: %s -> %s\n", n.Name.Value, n.ReturnType.Kind.String())
+		for i, param := range n.Parameters {
+			isLastParam := len(n.Body.Statements) == 0 && i == len(n.Parameters)-1
+			p.printNode(b, param, childIndent, isLastParam)
+		}
+		for i, stmt := range n.Body.Statements {
+			p.printNode(b, stmt, childIndent, i == len(n.Body.Statements)-1)
+		}
+	case ReturnStmt:
+		b.WriteString("ReturnStatement\n")
+		p.printNode(b, n.Value, childIndent, true)
 	case BinaryExpr:
 		fmt.Fprintf(b, "BinaryExpression: %s\n", n.Operator.Value)
 		p.printNode(b, n.Left, childIndent, false)
 		p.printNode(b, n.Right, childIndent, true)
+	case CallExpr:
+		b.WriteString("CallExpression\n")
+		if len(n.Arguments) == 0 {
+			p.printNode(b, n.Callee, childIndent, true)
+			return
+		}
+		p.printNode(b, n.Callee, childIndent, false)
+		for i, arg := range n.Arguments {
+			p.printNode(b, arg, childIndent, i == len(n.Arguments)-1)
+		}
 	case AssignExpr:
 		fmt.Fprintf(b, "AssignExpression: %s =\n", n.Name.Value)
 		p.printNode(b, n.Value, childIndent, true)
@@ -89,6 +111,8 @@ func (p *AstPrinter) printNode(b *strings.Builder, node any, indent string, isLa
 	case GroupingExpr:
 		b.WriteString("Grouping\n")
 		p.printNode(b, n.Expression, childIndent, true)
+	case Parameter:
+		fmt.Fprintf(b, "Parameter: %s : %s\n", n.Name.Value, n.Type.Kind.String())
 	default:
 		fmt.Fprintf(b, "Unknown Node: %T\n", node)
 	}

@@ -37,6 +37,14 @@ type BinaryExpr struct {
 
 func (BinaryExpr) exprNode() {}
 
+type CallExpr struct {
+	Callee    Expr
+	Paren     tok.Token
+	Arguments []Expr
+}
+
+func (CallExpr) exprNode() {}
+
 type AssignExpr struct {
 	Name  tok.Token
 	Value Expr
@@ -49,6 +57,11 @@ type GroupingExpr struct {
 }
 
 func (GroupingExpr) exprNode() {}
+
+type Parameter struct {
+	Name tok.Token
+	Type TypeAnnotation
+}
 
 type VarStmt struct {
 	Name         tok.Token
@@ -90,3 +103,19 @@ type WhileStmt struct {
 }
 
 func (WhileStmt) stmtNode() {}
+
+type FuncStmt struct {
+	Name       tok.Token
+	Parameters []Parameter
+	ReturnType TypeAnnotation
+	Body       BlockStmt
+}
+
+func (FuncStmt) stmtNode() {}
+
+type ReturnStmt struct {
+	Keyword tok.Token
+	Value   Expr
+}
+
+func (ReturnStmt) stmtNode() {}

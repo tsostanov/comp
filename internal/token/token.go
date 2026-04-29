@@ -11,6 +11,8 @@ const (
 	TokenTrue
 	TokenFalse
 	TokenVar
+	TokenFunc
+	TokenReturn
 	TokenPrint
 	TokenIf
 	TokenElse
@@ -37,6 +39,7 @@ const (
 	TokenLBrace
 	TokenRBrace
 	TokenColon
+	TokenComma
 	TokenSemicolon
 	TokenEOF
 )
@@ -48,6 +51,8 @@ var tokenTypeNames = []string{
 	"TRUE",
 	"FALSE",
 	"VAR",
+	"FUNC",
+	"RETURN",
 	"PRINT",
 	"IF",
 	"ELSE",
@@ -74,6 +79,7 @@ var tokenTypeNames = []string{
 	"LBRACE",
 	"RBRACE",
 	"COLON",
+	"COMMA",
 	"SEMICOLON",
 	"EOF",
 }

@@ -43,6 +43,12 @@ func (p *Parser) parseStatement() (ast.Stmt, error) {
 	if p.match(tok.TokenVar) {
 		return p.parseVarDeclaration()
 	}
+	if p.match(tok.TokenFunc) {
+		return p.parseFunctionDeclaration()
+	}
+	if p.match(tok.TokenReturn) {
+		return p.parseReturnStatement()
+	}
 	if p.match(tok.TokenPrint) {
 		return p.parsePrintStatement()
 	}
@@ -85,6 +91,71 @@ func (p *Parser) parseVarDeclaration() (ast.Stmt, error) {
 	}
 
 	return ast.VarStmt{Name: name, DeclaredType: declaredType, Initializer: initializer}, nil
+}
+
+func (p *Parser) parseFunctionDeclaration() (ast.Stmt, error) {
+	name, err := p.consume(tok.TokenID, "expected function name")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.consume(tok.TokenLParen, "expected '(' after function name"); err != nil {
+		return nil, err
+	}
+
+	var parameters []ast.Parameter
+	if !p.check(tok.TokenRParen) {
+		for {
+			paramName, err := p.consume(tok.TokenID, "expected parameter name")
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.consume(tok.TokenColon, "expected ':' after parameter name"); err != nil {
+				return nil, err
+			}
+			paramType, err := p.parseTypeAnnotation()
+			if err != nil {
+				return nil, err
+			}
+			parameters = append(parameters, ast.Parameter{Name: paramName, Type: *paramType})
+
+			if !p.match(tok.TokenComma) {
+				break
+			}
+		}
+	}
+
+	if _, err := p.consume(tok.TokenRParen, "expected ')' after parameter list"); err != nil {
+		return nil, err
+	}
+	if _, err := p.consume(tok.TokenColon, "expected ':' before function return type"); err != nil {
+		return nil, err
+	}
+	returnType, err := p.parseTypeAnnotation()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.consume(tok.TokenLBrace, "expected '{' before function body"); err != nil {
+		return nil, err
+	}
+	body, err := p.parseBlockStatement()
+	if err != nil {
+		return nil, err
+	}
+	block, ok := body.(ast.BlockStmt)
+	if !ok {
+		return nil, ParseError{
+			Message: "expected block statement in function body",
+			Line:    name.Line,
+			Column:  name.Column,
+		}
+	}
+
+	return ast.FuncStmt{
+		Name:       name,
+		Parameters: parameters,
+		ReturnType: *returnType,
+		Body:       block,
+	}, nil
 }
 
 func (p *Parser) parsePrintStatement() (ast.Stmt, error) {
@@ -144,6 +215,18 @@ func (p *Parser) parseWhileStatement() (ast.Stmt, error) {
 	}
 
 	return ast.WhileStmt{Condition: condition, Body: body}, nil
+}
+
+func (p *Parser) parseReturnStatement() (ast.Stmt, error) {
+	keyword := p.previous()
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.consume(tok.TokenSemicolon, "expected ';' after return value"); err != nil {
+		return nil, err
+	}
+	return ast.ReturnStmt{Keyword: keyword, Value: value}, nil
 }
 
 func (p *Parser) parseBlockStatement() (ast.Stmt, error) {
@@ -314,7 +397,42 @@ func (p *Parser) parseUnary() (ast.Expr, error) {
 		}
 		return ast.UnaryExpr{Operator: operator, Right: right}, nil
 	}
-	return p.parsePrimary()
+	return p.parseCall()
+}
+
+func (p *Parser) parseCall() (ast.Expr, error) {
+	expr, err := p.parsePrimary()
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		if !p.match(tok.TokenLParen) {
+			break
+		}
+
+		paren := p.previous()
+		var arguments []ast.Expr
+		if !p.check(tok.TokenRParen) {
+			for {
+				argument, err := p.parseExpression()
+				if err != nil {
+					return nil, err
+				}
+				arguments = append(arguments, argument)
+				if !p.match(tok.TokenComma) {
+					break
+				}
+			}
+		}
+
+		if _, err := p.consume(tok.TokenRParen, "expected ')' after arguments"); err != nil {
+			return nil, err
+		}
+		expr = ast.CallExpr{Callee: expr, Paren: paren, Arguments: arguments}
+	}
+
+	return expr, nil
 }
 
 func (p *Parser) parsePrimary() (ast.Expr, error) {

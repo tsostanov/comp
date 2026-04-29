@@ -6,6 +6,15 @@ import (
 	tok "comp/internal/token"
 )
 
+type lexerState int
+
+const (
+	stateDefault lexerState = iota
+	stateNumber
+	stateWord
+	stateString
+)
+
 type Lexer struct {
 	input    string
 	length   int
@@ -37,45 +46,57 @@ func (l *Lexer) Tokenize() ([]tok.Token, error) {
 }
 
 func (l *Lexer) TokenizeEach(yield func(tok.Token) bool) error {
+	state := stateDefault
 	for l.position < l.length {
-		current := l.Peek()
+		switch state {
+		case stateDefault:
+			current := l.Peek()
 
-		if isWhitespace(current) {
-			l.Next()
-			continue
-		}
+			if isWhitespace(current) {
+				l.Next()
+				continue
+			}
 
-		if isDigit(current) {
+			if current == '/' && l.PeekNext() == '/' {
+				l.skipLineComment()
+				continue
+			}
+
+			switch {
+			case isDigit(current):
+				state = stateNumber
+			case isAlpha(current):
+				state = stateWord
+			case current == '"':
+				state = stateString
+			default:
+				token, err := l.readOperatorOrPunctuation()
+				if err != nil {
+					return err
+				}
+				if !yield(token) {
+					return nil
+				}
+			}
+		case stateNumber:
 			if !yield(l.readNumber()) {
 				return nil
 			}
-			continue
-		}
-
-		if isAlpha(current) {
+			state = stateDefault
+		case stateWord:
 			if !yield(l.readWord()) {
 				return nil
 			}
-			continue
-		}
-
-		if current == '"' {
-			tok, err := l.readString()
+			state = stateDefault
+		case stateString:
+			token, err := l.readString()
 			if err != nil {
 				return err
 			}
-			if !yield(tok) {
+			if !yield(token) {
 				return nil
 			}
-			continue
-		}
-
-		tok, err := l.readOperatorOrPunctuation()
-		if err != nil {
-			return err
-		}
-		if !yield(tok) {
-			return nil
+			state = stateDefault
 		}
 	}
 
@@ -92,6 +113,8 @@ func (l *Lexer) TokenizeEach(yield func(tok.Token) bool) error {
 
 var keywords = map[string]tok.TokenType{
 	"var":    tok.TokenVar,
+	"func":   tok.TokenFunc,
+	"return": tok.TokenReturn,
 	"print":  tok.TokenPrint,
 	"if":     tok.TokenIf,
 	"else":   tok.TokenElse,
@@ -125,6 +148,7 @@ var operators = map[string]tok.TokenType{
 	"{":  tok.TokenLBrace,
 	"}":  tok.TokenRBrace,
 	":":  tok.TokenColon,
+	",":  tok.TokenComma,
 	";":  tok.TokenSemicolon,
 }
 
@@ -196,6 +220,12 @@ func (l *Lexer) readString() (tok.Token, error) {
 	}, nil
 }
 
+func (l *Lexer) skipLineComment() {
+	for l.position < l.length && l.Peek() != '\n' {
+		l.Next()
+	}
+}
+
 func (l *Lexer) readOperatorOrPunctuation() (tok.Token, error) {
 	start := l.position
 	startLine := l.line
@@ -236,6 +266,13 @@ func (l *Lexer) Peek() byte {
 		return 0
 	}
 	return l.input[l.position]
+}
+
+func (l *Lexer) PeekNext() byte {
+	if l.position+1 >= l.length {
+		return 0
+	}
+	return l.input[l.position+1]
 }
 
 func (l *Lexer) Next() byte {

@@ -45,20 +45,30 @@ type VariableSlot struct {
 	Initialized bool
 }
 
+type FunctionValue struct {
+	Declaration ast.FuncStmt
+	Closure     *Environment
+}
+
 type Environment struct {
 	parent    *Environment
 	variables map[string]*VariableSlot
+	functions map[string]*FunctionValue
 }
 
 func NewEnvironment(parent *Environment) *Environment {
 	return &Environment{
 		parent:    parent,
 		variables: make(map[string]*VariableSlot),
+		functions: make(map[string]*FunctionValue),
 	}
 }
 
 func (e *Environment) DefineVariable(name string, variableType ast.ValueType, value Value, initialized bool) bool {
 	if _, exists := e.variables[name]; exists {
+		return false
+	}
+	if _, exists := e.functions[name]; exists {
 		return false
 	}
 
@@ -79,6 +89,32 @@ func (e *Environment) ResolveVariable(name string) *VariableSlot {
 	return nil
 }
 
+func (e *Environment) DefineFunction(name string, function *FunctionValue) bool {
+	if _, exists := e.functions[name]; exists {
+		return false
+	}
+	if _, exists := e.variables[name]; exists {
+		return false
+	}
+
+	e.functions[name] = function
+	return true
+}
+
+func (e *Environment) ResolveFunction(name string) *FunctionValue {
+	for current := e; current != nil; current = current.parent {
+		if function, ok := current.functions[name]; ok {
+			return function
+		}
+	}
+	return nil
+}
+
+type statementResult struct {
+	value    Value
+	returned bool
+}
+
 type Executor struct {
 	environment *Environment
 	output      io.Writer
@@ -92,49 +128,83 @@ func NewExecutor(output io.Writer) *Executor {
 }
 
 func (e *Executor) Execute(statements []ast.Stmt) error {
+	_, returned, err := e.executeStatements(statements)
+	if err != nil {
+		return err
+	}
+	if returned {
+		return RuntimeError{Message: "return statement is only allowed inside functions"}
+	}
+	return nil
+}
+
+func (e *Executor) executeStatements(statements []ast.Stmt) (Value, bool, error) {
+	if err := e.predeclareFunctions(statements); err != nil {
+		return Value{}, false, err
+	}
 	for _, statement := range statements {
-		if err := e.executeStatement(statement); err != nil {
-			return err
+		value, returned, err := e.executeStatement(statement)
+		if err != nil {
+			return Value{}, false, err
+		}
+		if returned {
+			return value, true, nil
+		}
+	}
+	return Value{}, false, nil
+}
+
+func (e *Executor) predeclareFunctions(statements []ast.Stmt) error {
+	for _, statement := range statements {
+		function, ok := statement.(ast.FuncStmt)
+		if !ok {
+			continue
+		}
+		if e.environment.functions[function.Name.Value] != nil {
+			return runtimeError(function.Name, "name "+function.Name.Value+" is already declared in this scope")
+		}
+		if !e.environment.DefineFunction(function.Name.Value, &FunctionValue{
+			Declaration: function,
+			Closure:     e.environment,
+		}) {
+			return runtimeError(function.Name, "name "+function.Name.Value+" is already declared in this scope")
 		}
 	}
 	return nil
 }
 
-func (e *Executor) executeStatement(statement ast.Stmt) error {
+func (e *Executor) executeStatement(statement ast.Stmt) (Value, bool, error) {
 	switch s := statement.(type) {
 	case ast.VarStmt:
-		return e.executeVarStatement(s)
+		return Value{}, false, e.executeVarStatement(s)
+	case ast.FuncStmt:
+		return Value{}, false, nil
+	case ast.ReturnStmt:
+		value, err := e.evaluateExpression(s.Value)
+		if err != nil {
+			return Value{}, false, err
+		}
+		return value, true, nil
 	case ast.PrintStmt:
 		value, err := e.evaluateExpression(s.Expression)
 		if err != nil {
-			return err
+			return Value{}, false, err
 		}
 		_, err = fmt.Fprintln(e.output, value.String())
-		return err
+		return Value{}, false, err
 	case ast.ExprStmt:
 		_, err := e.evaluateExpression(s.Expression)
-		return err
+		return Value{}, false, err
 	case ast.BlockStmt:
-		previous := e.environment
-		e.environment = NewEnvironment(previous)
-		defer func() {
-			e.environment = previous
-		}()
-
-		for _, nested := range s.Statements {
-			if err := e.executeStatement(nested); err != nil {
-				return err
-			}
-		}
-		return nil
+		return e.executeBlockStatement(s)
 	case ast.IfStmt:
 		condition, err := e.evaluateExpression(s.Condition)
 		if err != nil {
-			return err
+			return Value{}, false, err
 		}
 		conditionValue, err := e.expectBool(condition, expressionToken(s.Condition), "if condition must be bool")
 		if err != nil {
-			return err
+			return Value{}, false, err
 		}
 		if conditionValue {
 			return e.executeStatement(s.ThenBranch)
@@ -142,27 +212,41 @@ func (e *Executor) executeStatement(statement ast.Stmt) error {
 		if s.ElseBranch != nil {
 			return e.executeStatement(s.ElseBranch)
 		}
-		return nil
+		return Value{}, false, nil
 	case ast.WhileStmt:
 		for {
 			condition, err := e.evaluateExpression(s.Condition)
 			if err != nil {
-				return err
+				return Value{}, false, err
 			}
 			conditionValue, err := e.expectBool(condition, expressionToken(s.Condition), "while condition must be bool")
 			if err != nil {
-				return err
+				return Value{}, false, err
 			}
 			if !conditionValue {
-				return nil
+				return Value{}, false, nil
 			}
-			if err := e.executeStatement(s.Body); err != nil {
-				return err
+			value, returned, err := e.executeStatement(s.Body)
+			if err != nil {
+				return Value{}, false, err
+			}
+			if returned {
+				return value, true, nil
 			}
 		}
 	default:
-		return nil
+		return Value{}, false, nil
 	}
+}
+
+func (e *Executor) executeBlockStatement(statement ast.BlockStmt) (Value, bool, error) {
+	previous := e.environment
+	e.environment = NewEnvironment(previous)
+	defer func() {
+		e.environment = previous
+	}()
+
+	return e.executeStatements(statement.Statements)
 }
 
 func (e *Executor) executeVarStatement(statement ast.VarStmt) error {
@@ -194,7 +278,7 @@ func (e *Executor) executeVarStatement(statement ast.VarStmt) error {
 	}
 
 	if !e.environment.DefineVariable(statement.Name.Value, variableType, value, initialized) {
-		return runtimeError(statement.Name, "variable "+statement.Name.Value+" is already declared in this scope")
+		return runtimeError(statement.Name, "name "+statement.Name.Value+" is already declared in this scope")
 	}
 	return nil
 }
@@ -239,9 +323,66 @@ func (e *Executor) evaluateExpression(expression ast.Expr) (Value, error) {
 		return e.evaluateUnary(expr.Operator, right)
 	case ast.BinaryExpr:
 		return e.evaluateBinary(expr)
+	case ast.CallExpr:
+		return e.evaluateCall(expr)
 	default:
 		return Value{}, RuntimeError{Message: "unsupported expression"}
 	}
+}
+
+func (e *Executor) evaluateCall(expression ast.CallExpr) (Value, error) {
+	callee, ok := expression.Callee.(ast.VariableExpr)
+	if !ok {
+		return Value{}, runtimeError(expression.Paren, "can only call named functions")
+	}
+
+	function := e.environment.ResolveFunction(callee.Name.Value)
+	if function == nil {
+		return Value{}, runtimeError(callee.Name, "call to undeclared function "+callee.Name.Value)
+	}
+
+	if len(expression.Arguments) != len(function.Declaration.Parameters) {
+		return Value{}, runtimeError(callee.Name, fmt.Sprintf("function %s expects %d arguments, got %d", function.Declaration.Name.Value, len(function.Declaration.Parameters), len(expression.Arguments)))
+	}
+
+	arguments := make([]Value, 0, len(expression.Arguments))
+	for _, argument := range expression.Arguments {
+		value, err := e.evaluateExpression(argument)
+		if err != nil {
+			return Value{}, err
+		}
+		arguments = append(arguments, value)
+	}
+
+	return e.callFunction(function, arguments)
+}
+
+func (e *Executor) callFunction(function *FunctionValue, arguments []Value) (Value, error) {
+	previous := e.environment
+	callEnvironment := NewEnvironment(function.Closure)
+	e.environment = callEnvironment
+	defer func() {
+		e.environment = previous
+	}()
+
+	for index, parameter := range function.Declaration.Parameters {
+		argument := arguments[index]
+		if parameter.Type.Kind != argument.Type {
+			return Value{}, runtimeError(parameter.Name, "cannot assign value of type "+argument.Type.String()+" to parameter "+parameter.Name.Value+" of type "+parameter.Type.Kind.String())
+		}
+		if !e.environment.DefineVariable(parameter.Name.Value, parameter.Type.Kind, argument, true) {
+			return Value{}, runtimeError(parameter.Name, "name "+parameter.Name.Value+" is already declared in this scope")
+		}
+	}
+
+	value, returned, err := e.executeStatements(function.Declaration.Body.Statements)
+	if err != nil {
+		return Value{}, err
+	}
+	if !returned {
+		return Value{}, runtimeError(function.Declaration.Name, "function "+function.Declaration.Name.Value+" did not return a value")
+	}
+	return value, nil
 }
 
 func (e *Executor) evaluateUnary(operator tok.Token, right Value) (Value, error) {
@@ -470,6 +611,8 @@ func expressionToken(expression ast.Expr) tok.Token {
 		return expr.Operator
 	case ast.BinaryExpr:
 		return expr.Operator
+	case ast.CallExpr:
+		return expr.Paren
 	case ast.AssignExpr:
 		return expr.Name
 	case ast.GroupingExpr:

@@ -24,13 +24,17 @@ Small educational compiler front-end in Go. It includes:
 The language supports:
 
 - variable declarations: `var x: int;`, `var x: int = 10;`, `var x = 10;`
+- function declarations: `func add(a: int, b: int): int { return a + b; }`
+- function calls: `add(1, 2)`
 - assignment: `x = 20;`
+- return statements: `return x;`
 - output: `print x;`
 - blocks: `{ ... }`
 - conditions: `if (...) ... else ...`
 - loops: `while (...) ...`
 - literals: integers, strings, booleans (`true`, `false`)
 - operators: `+`, `-`, `*`, `/`, `!`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `and`, `or`, `&&`, `||`
+- line comments: `// comment`
 
 ## Type System
 
@@ -47,6 +51,8 @@ Rules:
 - a variable must have an explicit type annotation or an initializer
 - if the type is omitted, it is inferred from the initializer
 - assignments must match the declared or inferred type
+- function arguments must match parameter types
+- return expressions must match the declared function return type
 - `if` and `while` conditions must be `bool`
 - arithmetic operators work with `int`
 - logical operators work with `bool`
@@ -63,6 +69,7 @@ The analyzer reports:
 - redeclaration in the same scope
 - unused variables
 - type mismatches in declarations and assignments
+- invalid function calls and return types
 - invalid operand types in expressions
 
 ## Run
@@ -92,13 +99,15 @@ go run ./cmd/comp --ast examples/program.txt
 `examples/program.txt`:
 
 ```txt
-var x: int;
-if (true) {
-    x = 10;
-} else {
-    x = 20;
+func classify(total: int): string {
+    if (total >= 20) {
+        return "large";
+    }
+    return "small";
 }
-print x;
+
+var total: int = 57;
+print classify(total);
 ```
 
 ## Tests

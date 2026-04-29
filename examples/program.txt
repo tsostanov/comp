@@ -1,10 +1,22 @@
+func adjust(base: int, delta: int): int {
+	return base + delta;
+}
+
+func classify(total: int): string {
+	if (total >= 20) {
+		return "large";
+	}
+	return "small";
+}
+
 var a: int = 10;
 var b: int = 4;
-var total = a * (b + 2) - 3;
+var total = adjust(a * (b + 2), -3);
 var isLarge: bool = total >= 20 and a != b;
+var label: string = classify(total);
 
 if (isLarge) {
-	print "large";
+	print label;
 } else {
 	print "small";
 }

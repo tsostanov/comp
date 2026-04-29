@@ -94,3 +94,57 @@ func TestExecutorReportsDivisionByZero(t *testing.T) {
 		t.Fatalf("expected division by zero error, got %v", err)
 	}
 }
+
+func TestExecutorCallsFunction(t *testing.T) {
+	output, err := executeSource(t, `
+func add(a: int, b: int): int {
+	return a + b;
+}
+
+print add(2, 5);
+`)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if output != "7\n" {
+		t.Fatalf("expected output %q, got %q", "7\n", output)
+	}
+}
+
+func TestExecutorAllowsCallBeforeFunctionDeclaration(t *testing.T) {
+	output, err := executeSource(t, `
+print twice(4);
+
+func twice(value: int): int {
+	return value * 2;
+}
+`)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if output != "8\n" {
+		t.Fatalf("expected output %q, got %q", "8\n", output)
+	}
+}
+
+func TestExecutorSupportsRecursion(t *testing.T) {
+	output, err := executeSource(t, `
+func fact(n: int): int {
+	if (n == 0) {
+		return 1;
+	}
+	return n * fact(n - 1);
+}
+
+print fact(5);
+`)
+	if err != nil {
+		t.Fatalf("execute failed: %v", err)
+	}
+
+	if output != "120\n" {
+		t.Fatalf("expected output %q, got %q", "120\n", output)
+	}
+}
